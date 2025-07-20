@@ -13,6 +13,7 @@ public class CTRL_Citizen : MonoBehaviour
     [SerializeField] List<Vector3> _Path;
     bool _IsRunningAway;
     bool _IsMovingReverse;
+    bool _IsDead;
 
     void Start()
     {
@@ -32,16 +33,20 @@ public class CTRL_Citizen : MonoBehaviour
         (_Path, _PathPointID) = MNGR_Paths.SGL.Get_ClosestPath(transform.position);
         _IsRunningAway = false;
         _IsMovingReverse = Random.value > 0.5f;
+        _IsDead = false;
     }
 
-    public Vector3 Get_Position()
+    void Update()
     {
-        return transform.position;
+        if (_IsDead == true)
+            return;
+
+        Move();
     }
 
-    public void Move()
+    void Move()
     {
-        Vector3 _PlayerPosition = CTRL_Player.SGL.Get_Position();
+        Vector3 _PlayerPosition = CTRL_Player.SGL.transform.position;
         float _DistanceFromPlayer = Vector3.Distance(transform.position, _PlayerPosition);
         if (_DistanceFromPlayer < MNGR_Citizens.SGL._RunAway_DistanceFromPlayer)
         {
@@ -92,7 +97,10 @@ public class CTRL_Citizen : MonoBehaviour
         bool _IsCloseToPlayer = true;
         while (_RunAwayTime < MNGR_Citizens.SGL._CitizenRunAwayMinTime || _IsCloseToPlayer == true)
         {
-            Vector3 _PlayerPosition = CTRL_Player.SGL.Get_Position();
+            if (_IsDead == false)
+                yield return null;
+
+            Vector3 _PlayerPosition = CTRL_Player.SGL.transform.position;
             Vector3 _RunAwayDirection = Vector3.zero;
             Vector3 _DirectionForward = (transform.position - _PlayerPosition).normalized;
             _DirectionForward.y = 0f;
@@ -174,11 +182,12 @@ public class CTRL_Citizen : MonoBehaviour
     #region Kill
     public void Kill(Vector3 _PlayerPosition)
     {
+        _IsDead = true;
         _BoxCollider.enabled = false;
         _Animator.enabled = false;
 
         Vector3 _ForceDirection = (transform.position - _PlayerPosition).normalized;
-        float _ForceStrength = 120f;
+        float _ForceStrength = 50f;
         foreach (Rigidbody _RB in _RagdollBodies)
         {
             _RB.constraints = RigidbodyConstraints.None;
