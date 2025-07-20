@@ -1,7 +1,14 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using TreeEditor;
 using UnityEngine;
+
+public enum Player_Attacks
+{
+    Bite,
+    Scratch
+}
 
 public class CTRL_Player : MonoBehaviour
 {
@@ -19,7 +26,7 @@ public class CTRL_Player : MonoBehaviour
 
     bool _IsAnimationLocked;
 
-    [Header("Bite")]
+    [Header("Jump")]
     [SerializeField] float _JumpCountMax;
     [SerializeField] float _JumpCountCurrent;
     [SerializeField] float _JumpRange;
@@ -28,11 +35,19 @@ public class CTRL_Player : MonoBehaviour
     [SerializeField] float _JumpDuration;
     [SerializeField] AnimationCurve _JumpSpeed;
     [SerializeField] AnimationCurve _JumpHeight;
+    [SerializeField] float _JumpHeightPeak;
 
     [Header("Bite")]
     [SerializeField] float _BiteCooldown;
     [SerializeField] float _BiteTimer;
     [SerializeField] float _BiteRange;
+    [SerializeField] float _BiteDuration;
+
+    [Header("Scratch")]
+    [SerializeField] float _ScratchCooldown;
+    [SerializeField] float _ScratchTimer;
+    [SerializeField] float _ScratchRange;
+    [SerializeField] float _ScratchDuration;
 
     [Header("Leveling")]
     [SerializeField] int _KillCounter;
@@ -76,8 +91,6 @@ public class CTRL_Player : MonoBehaviour
 
     void Update()
     {
-        Vector3 _JumpPosition = Jump_DisplayTargetPosition();
-        
         if (_IsAnimationLocked == true)
             return;
 
@@ -86,8 +99,9 @@ public class CTRL_Player : MonoBehaviour
         Rotate_Player();
 
         // Skills
-        Jump(_JumpPosition);
+        Jump();
         Bite();
+        Scratch();
     }
 
     void Move_Player()
@@ -123,7 +137,7 @@ public class CTRL_Player : MonoBehaviour
 
     #region Jump
 
-    void Jump(Vector3 _JumpPosition)
+    void Jump()
     {
         // Skill cooldown
         if (_JumpCountCurrent < _JumpCountMax)
@@ -137,44 +151,43 @@ public class CTRL_Player : MonoBehaviour
         if (_JumpCountCurrent == 0)
             return;
 
+        // Check target
+        CTRL_Citizen _JumpTarget = Get_JumpTarget();
+        if (_JumpTarget == null)
+            return;
+
         // Check skill input
         if (Input.GetKeyDown(KeyCode.Space))
         {
             _JumpCountCurrent--;
-            StartCoroutine(C_Jump(_JumpPosition));
+            StartCoroutine(C_Jump(_JumpTarget));
         }
     }
 
-    Vector3 Jump_DisplayTargetPosition()
+    CTRL_Citizen Get_JumpTarget()
     {
-        // Init
-        Vector3 _InitialPosition = transform.position;
-        _InitialPosition.y = 0f;
-        Vector3 _JumpDirection = transform.forward;
-        _JumpDirection.y = 0f;
-        Vector3 _TargetPosition = _InitialPosition + _JumpRange * _JumpDirection;
+        CTRL_Citizen _TargetCitizen = null;
 
-        // Check position looked at player and find any collider to jump on
-        int _LayersToCheck = LayerMask.GetMask("Buildings", "Citizens", "Ground");
-        float _StopDistanceFromHit = 0.5f;
+        // Check for target
+        int _LayersToCheck = LayerMask.GetMask("Buildings", "Citizens");
         Vector3 _RayCastOrigin = CTRL_PlayerCamera.SGL.transform.position;
         Vector3 _RayCastirection = CTRL_PlayerCamera.SGL.transform.forward;
+
+        // Check for citizen (and building to not jump thought them)
         if (Physics.Raycast(_RayCastOrigin, _RayCastirection, out RaycastHit _JumpHit, _JumpRange, _LayersToCheck))
         {
-            // Jump in front of building (avoid to bugs with physic/collider)
-            if (_JumpHit.transform.name == "Building")
-                _TargetPosition = _JumpHit.point - _StopDistanceFromHit * _JumpDirection;
-            else
-                _TargetPosition = _JumpHit.point;
+            if (_JumpHit.transform.gameObject.layer == LayerMask.GetMask("Buildings") == false)
+                _TargetCitizen = _JumpHit.transform.GetComponent<CTRL_Citizen>();
         }
-        _TargetPosition.y = 0;
 
-        return _TargetPosition;
+        return _TargetCitizen;
     }
 
-    IEnumerator C_Jump(Vector3 _JumpPosition)
+    IEnumerator C_Jump(CTRL_Citizen _JumpTarget)
     {
         _IsAnimationLocked = true;
+        _Animator.SetBool("Jump", true);
+
         Vector3 _InitialPosition = transform.position;
         _InitialPosition.y = 0f;
 
@@ -183,23 +196,29 @@ public class CTRL_Player : MonoBehaviour
         Vector3 _NewPosition;
         while (_JumpTimer < _JumpDuration)
         {
+            // Follow target move, but jump in front of it (0.5 meter), not at its position
+            Vector3 _JumpVector = _JumpTarget.transform.position - transform.position;
+            Vector3 _JumpPosition = transform.position + _JumpVector - 0.5f * _JumpVector.normalized;
+            _JumpPosition.y = 0f;
+
             float _JumpProgression = _JumpSpeed.Evaluate(_JumpTimer / _JumpDuration);
             _NewPosition = Vector3.Lerp(_InitialPosition, _JumpPosition, _JumpProgression);
-            float _Height = _JumpHeight.Evaluate(_JumpProgression);
+            float _Height = _JumpHeightPeak * _JumpHeight.Evaluate(_JumpProgression);
             _NewPosition += _Height * Vector3.up;
             transform.position = _NewPosition;
 
             yield return new WaitForEndOfFrame();
             _JumpTimer += Time.deltaTime;
         }
-        transform.position = _JumpPosition;
 
         _IsAnimationLocked = false;
+        _Animator.SetBool("Jump", false);
+
         yield return null;
     }
 
     #endregion Jump
-    
+
     #region Bite
     void Bite()
     {
@@ -214,10 +233,8 @@ public class CTRL_Player : MonoBehaviour
         // Check skill input
         if (Input.GetKeyDown(KeyCode.Mouse0))
         {
-            _BiteTimer = 0f;
-
             Vector3 _BoxColliderPosition = transform.position + transform.forward * _BiteRange / 2 + _BiteRange / 2 * Vector3.up;
-            Vector3 _BoxColliderHalf = new Vector3(2f, 1f, 0.5f * _BiteRange);
+            Vector3 _BoxColliderHalf = new Vector3(1f, 1f, 0.5f * _BiteRange);
             int _LayersToCheck = LayerMask.GetMask("Citizens");
             Collider[] _HitCitizens = Physics.OverlapBox(
                                             _BoxColliderPosition,
@@ -227,25 +244,112 @@ public class CTRL_Player : MonoBehaviour
 
             if (_HitCitizens.Length > 0)
             {
-                for (int _CitizenID = _HitCitizens.Length -1; _CitizenID >= 0; _CitizenID--)
-                {
-                    CTRL_Citizen _Citizen = _HitCitizens[_CitizenID].GetComponent<CTRL_Citizen>();
-                    MNGR_Citizens.SGL.Kill_Citizen(_Citizen);
-                } 
+                _BiteTimer = 0f;
+                StartCoroutine(C_Bite(_HitCitizens));
             }
         }
     }
 
-    void OnDrawGizmos()
+    IEnumerator C_Bite(Collider[] _HitCitizens)
     {
-        Gizmos.color = Color.red;
+        _IsAnimationLocked = true;
+        _Animator.SetBool("Attack", true);
+        _Animator.SetFloat("AttackType", (float)Player_Attacks.Bite);
 
-        Vector3 _BoxColliderPosition = transform.position + transform.forward * _BiteRange / 2 + _BiteRange / 2 * Vector3.up;
-        Vector3 _BoxSize = new Vector3(2f, 1f, 0.5f * _BiteRange);
-        Gizmos.matrix = Matrix4x4.TRS(_BoxColliderPosition, transform.rotation, Vector3.one);
-        Gizmos.DrawWireCube(Vector3.zero, 2*_BoxSize);
+        transform.LookAt(_HitCitizens[0].transform.position);
+
+        // Stop  citizen hit
+        for (int _CitizenID = _HitCitizens.Length - 1; _CitizenID >= 0; _CitizenID--)
+        {
+            CTRL_Citizen _Citizen = _HitCitizens[_CitizenID].GetComponent<CTRL_Citizen>();
+            _Citizen.Hit();
+        }
+
+        // Animation run 
+        float _BiteAnimationTimer = 0f;
+        while (_BiteAnimationTimer < _BiteDuration)
+        {
+            _BiteAnimationTimer += Time.deltaTime;
+            yield return new WaitForEndOfFrame();
+        }
+
+        // Kill citizen hit
+        for (int _CitizenID = _HitCitizens.Length - 1; _CitizenID >= 0; _CitizenID--)
+        {
+            CTRL_Citizen _Citizen = _HitCitizens[_CitizenID].GetComponent<CTRL_Citizen>();
+            MNGR_Citizens.SGL.Kill_Citizen(_Citizen);
+        }
+
+        _IsAnimationLocked = false;
+        _Animator.SetBool("Attack", false);
     }
 
-  
+    #endregion Bite
+
+    #region Scratch
+    void Scratch()
+    {
+        // Bite cooldown
+        if (_ScratchTimer < _ScratchCooldown)
+            _ScratchTimer += Time.deltaTime;
+
+        // Check skill availability
+        if (_ScratchTimer < _ScratchCooldown)
+            return;
+
+        // Check skill input
+        if (Input.GetKeyDown(KeyCode.Mouse1))
+        {
+            Vector3 _BoxColliderPosition = transform.position + transform.forward * _ScratchRange / 2 + _ScratchRange / 2 * Vector3.up;
+            Vector3 _BoxColliderHalf = new Vector3(1f, 1f, 0.5f * _ScratchRange);
+            int _LayersToCheck = LayerMask.GetMask("Citizens");
+            Collider[] _HitCitizens = Physics.OverlapBox(
+                                            _BoxColliderPosition,
+                                            _BoxColliderHalf,
+                                            transform.rotation,
+                                            _LayersToCheck);
+            _ScratchTimer = 0f;
+            StartCoroutine(C_Scratch(_HitCitizens));
+        }
+    }
+
+    IEnumerator C_Scratch(Collider[] _HitCitizens)
+    {
+        _IsAnimationLocked = true;
+        _Animator.SetBool("Attack", true);
+        _Animator.SetFloat("AttackType", (float)Player_Attacks.Scratch);
+
+        if (_HitCitizens.Length > 0)
+        {
+            // Stop  citizen hit
+            for (int _CitizenID = _HitCitizens.Length - 1; _CitizenID >= 0; _CitizenID--)
+            {
+                CTRL_Citizen _Citizen = _HitCitizens[_CitizenID].GetComponent<CTRL_Citizen>();
+                _Citizen.Hit();
+            }
+        }
+
+        // Animation run 
+        float _ScratchAnimationTimer = 0f;
+        while (_ScratchAnimationTimer < _ScratchDuration)
+        {
+            _ScratchAnimationTimer += Time.deltaTime;
+            yield return new WaitForEndOfFrame();
+        }
+
+        if (_HitCitizens.Length > 0)
+        {
+            // Kill citizen hit
+            for (int _CitizenID = _HitCitizens.Length - 1; _CitizenID >= 0; _CitizenID--)
+            {
+                CTRL_Citizen _Citizen = _HitCitizens[_CitizenID].GetComponent<CTRL_Citizen>();
+                MNGR_Citizens.SGL.Kill_Citizen(_Citizen);
+            }
+        }
+
+        _IsAnimationLocked = false;
+        _Animator.SetBool("Attack", false);
+    }
+
     #endregion Bite
 }

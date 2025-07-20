@@ -1,6 +1,6 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
-using UnityEditor.UIElements;
 using UnityEngine;
 
 public class CTRL_Citizen : MonoBehaviour
@@ -14,6 +14,7 @@ public class CTRL_Citizen : MonoBehaviour
     bool _IsRunningAway;
     bool _IsMovingReverse;
     bool _IsDead;
+    bool _IsHit;
 
     void Start()
     {
@@ -32,13 +33,13 @@ public class CTRL_Citizen : MonoBehaviour
 
         (_Path, _PathPointID) = MNGR_Paths.SGL.Get_ClosestPath(transform.position);
         _IsRunningAway = false;
-        _IsMovingReverse = Random.value > 0.5f;
+        _IsMovingReverse = UnityEngine.Random.value > 0.5f;
         _IsDead = false;
     }
 
     void Update()
     {
-        if (_IsDead == true)
+        if (_IsDead || _IsHit)
             return;
 
         Move();
@@ -97,8 +98,8 @@ public class CTRL_Citizen : MonoBehaviour
         bool _IsCloseToPlayer = true;
         while (_RunAwayTime < MNGR_Citizens.SGL._CitizenRunAwayMinTime || _IsCloseToPlayer == true)
         {
-            if (_IsDead == false)
-                yield return null;
+            if (_IsDead || _IsHit)
+                yield break;
 
             Vector3 _PlayerPosition = CTRL_Player.SGL.transform.position;
             Vector3 _RunAwayDirection = Vector3.zero;
@@ -177,6 +178,12 @@ public class CTRL_Citizen : MonoBehaviour
         }
 
         return _ClosestPathPointID;
+    }
+
+    public void Hit()
+    {
+        _IsHit = true;
+        _Animator.SetBool("Run", false);
     }
 
     #region Kill
